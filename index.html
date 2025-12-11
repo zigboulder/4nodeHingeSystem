@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>4-Node Beam + Hinge IK Demo (BG + Advanced)</title>
+  <title>N-Node IK Chain Lab</title>
   <style>
     body {
       margin: 0;
@@ -16,7 +16,7 @@
       height: 100vh;
     }
     #ikCanvas {
-      background: #000; /* 이미지 없을 때 검정 */
+      background: #000; /* 이미지 없거나 실패시 검정 */
       margin-top: 10px;
       border-radius: 8px;
       box-shadow: 0 0 20px rgba(0,0,0,0.5);
@@ -28,43 +28,19 @@
       flex-wrap: wrap;
       gap: 8px 16px;
       background: #1b1b1b;
-      padding: 10px 14px;
+      padding: 8px 14px;
       border-radius: 10px;
       border: 1px solid #333;
-      max-width: 880px;
-    }
-    .group {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 11px;
-    }
-    .group h4 {
-      margin: 0 0 2px 0;
+      max-width: 900px;
       font-size: 12px;
-      color: #ffb74d;
-    }
-    .field {
-      display: flex;
       align-items: center;
-      gap: 4px;
     }
-    .field label {
-      min-width: 22px;
-      color: #bbb;
-    }
-    .field input {
-      width: 64px;
-      background: #262626;
-      border: 1px solid #444;
-      border-radius: 4px;
-      padding: 2px 4px;
-      color: #eee;
-      font-size: 11px;
+    .panel .status {
+      margin-right: 12px;
+      color: #b0bec5;
+      font-size: 12px;
     }
     .panel button {
-      align-self: flex-end;
-      margin-left: auto;
       padding: 6px 12px;
       border-radius: 6px;
       border: none;
@@ -73,7 +49,13 @@
       font-size: 12px;
       cursor: pointer;
     }
-    .panel button:hover { background: #1e88e5; }
+    .panel button:disabled {
+      background: #555;
+      cursor: default;
+    }
+    .panel button:hover:not(:disabled) {
+      background: #1e88e5;
+    }
 
     .subpanel {
       margin-top: 4px;
@@ -84,11 +66,31 @@
       padding: 8px 12px;
       border-radius: 10px;
       border: 1px solid #333;
-      max-width: 880px;
+      max-width: 900px;
+      font-size: 11px;
+      align-items: center;
+    }
+    .field {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .field label {
+      min-width: 70px;
+      color: #bbb;
       font-size: 11px;
     }
-    .subpanel .field label {
-      min-width: 70px;
+    .field input {
+      width: 140px;
+      background: #262626;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 2px 4px;
+      color: #eee;
+      font-size: 11px;
+    }
+    .small-input {
+      width: 60px !important;
     }
     .subpanel button {
       padding: 5px 10px;
@@ -99,7 +101,9 @@
       font-size: 11px;
       cursor: pointer;
     }
-    .subpanel button:hover { background: #5e35b1; }
+    .subpanel button:hover {
+      background: #5e35b1;
+    }
 
     .info {
       margin-top: 6px;
@@ -111,46 +115,21 @@
   </style>
 </head>
 <body>
-  <canvas id="ikCanvas" width="800" height="380"></canvas>
+  <canvas id="ikCanvas" width="800" height="400"></canvas>
 
-  <!-- 기본 설정 패널 -->
+  <!-- 상단: 빌드 & 모드 상태 -->
   <div class="panel">
-    <div class="group">
-      <h4>Node 0</h4>
-      <div class="field"><label>X</label><input id="n0x" type="number" value="150"></div>
-      <div class="field"><label>Y</label><input id="n0y" type="number" value="190"></div>
-    </div>
-    <div class="group">
-      <h4>Node 1</h4>
-      <div class="field"><label>X</label><input id="n1x" type="number" value="350"></div>
-      <div class="field"><label>Y</label><input id="n1y" type="number" value="190"></div>
-    </div>
-    <div class="group">
-      <h4>Node 2</h4>
-      <div class="field"><label>X</label><input id="n2x" type="number" value="550"></div>
-      <div class="field"><label>Y</label><input id="n2y" type="number" value="190"></div>
-    </div>
-    <div class="group">
-      <h4>Node 3</h4>
-      <div class="field"><label>X</label><input id="n3x" type="number" value="750"></div>
-      <div class="field"><label>Y</label><input id="n3y" type="number" value="190"></div>
-    </div>
-
-    <div class="group">
-      <h4>Joint 1 (0-1-2)</h4>
-      <div class="field"><label>Min</label><input id="j1min" type="number" value="40"></div>
-      <div class="field"><label>Max</label><input id="j1max" type="number" value="160"></div>
-    </div>
-    <div class="group">
-      <h4>Joint 2 (1-2-3)</h4>
-      <div class="field"><label>Min</label><input id="j2min" type="number" value="40"></div>
-      <div class="field"><label>Max</label><input id="j2max" type="number" value="160"></div>
-    </div>
-
-    <button id="applyBtn">Apply</button>
+    <span class="status" id="modeLabel">
+      Mode: Building (캔버스를 클릭해서 노드를 추가하세요)
+    </span>
+    <span class="status" id="nodeCountLabel">
+      Nodes: 0
+    </span>
+    <button id="resetBtn">Reset Nodes</button>
+    <button id="applyBtn" disabled>Apply System</button>
   </div>
 
-  <!-- 배경 & 고급 설정 패널 -->
+  <!-- 배경 + Advanced -->
   <div class="subpanel">
     <div class="field" style="flex: 1 1 260px;">
       <label>Image URL</label>
@@ -160,71 +139,60 @@
 
     <div class="field">
       <label>alpha (0~1)</label>
-      <input id="alphaInput" type="number" step="0.05" value="0.25">
+      <input id="alphaInput" class="small-input" type="number" step="0.05" value="0.25">
     </div>
     <div class="field">
-      <label>stepDeg</label>
-      <input id="stepDegInput" type="number" value="2">
+      <label>iterations</label>
+      <input id="iterInput" class="small-input" type="number" value="10">
     </div>
     <div class="field">
-      <label>tolerance</label>
-      <input id="tolInput" type="number" value="50">
-    </div>
-    <div class="field">
-      <label>contWeight</label>
-      <input id="contInput" type="number" step="0.05" value="0.2">
+      <label>moveFactor</label>
+      <input id="moveInput" class="small-input" type="number" step="0.1" value="1.0">
     </div>
   </div>
 
   <div class="info">
-    0~3번 노드를 드래그하면 그 위치가 목적지로 설정되고, IK가 그쪽으로 서서히 수렴합니다.<br/>
-    Image URL을 넣고 Load Image를 누르면 배경과 캔버스 크기가 이미지 비율에 맞게 조정됩니다.
+    📌 Building 모드: 캔버스를 클릭해서 0,1,2,...,N-1 번 노드를 순서대로 찍습니다. (최소 2개)<br/>
+    Apply System을 누르면 0번과 (N-1)번 노드가 고정되고, 중간 노드를 드래그하면 IK로 서서히 따라옵니다.<br/>
+    배경 이미지는 URL + Load Image로 넣을 수 있으며, 비율에 맞게 캔버스 크기가 조정됩니다.
   </div>
 
   <script>
     const canvas = document.getElementById('ikCanvas');
     const ctx = canvas.getContext('2d');
 
-    // ---- 배경 이미지 상태 ----
+    const modeLabel = document.getElementById('modeLabel');
+    const nodeCountLabel = document.getElementById('nodeCountLabel');
+    const resetBtn = document.getElementById('resetBtn');
+    const applyBtn = document.getElementById('applyBtn');
+
+    const bgUrlInput = document.getElementById('bgUrl');
+    const loadBgBtn = document.getElementById('loadBgBtn');
+
+    const alphaInput = document.getElementById('alphaInput');
+    const iterInput = document.getElementById('iterInput');
+    const moveInput = document.getElementById('moveInput');
+
+    // ---- 상태 ----
     let bgImage = null;
     let bgLoaded = false;
 
-    // ---- IK 파라미터 (Advanced) ----
-    let alpha = 0.25;            // 수렴 속도
-    let ikStepDeg = 2;           // 각도 탐색 step
-    let ikTolerance = 50;        // 드래그 목표 허용 오차
-    let continuityWeight = 0.2;  // 연속성 가중치
+    let nodes = [];       // {x, y, fixed: bool}
+    let lengths = [];     // segment lengths: length between i and i+1
+    let buildingMode = true;   // 노드 생성 모드
+    let systemActive = false;  // IK 시스템 활성 여부
 
-    // ---- 노드 & 길이 ----
-    let nodes = [
-      { x: 150, y: 190, fixedVisual: true  }, // 0
-      { x: 350, y: 190, fixedVisual: false }, // 1
-      { x: 550, y: 190, fixedVisual: false }, // 2
-      { x: 750, y: 190, fixedVisual: true  }  // 3
-    ];
+    let alpha = 0.25;          // 수렴 속도
+    let iterations = 10;       // 길이 제약 반복 횟수
+    let moveFactor = 1.0;      // 타겟으로 끌어당기는 강도
 
-    let lengths = [
-      dist(nodes[0], nodes[1]),
-      dist(nodes[1], nodes[2]),
-      dist(nodes[2], nodes[3])
-    ];
-
-    // 각도 제한 (라디안)
-    let joint1MinRad = degToRad(40);
-    let joint1MaxRad = degToRad(160);
-    let joint2MinRad = degToRad(40);
-    let joint2MaxRad = degToRad(160);
-
-    // 드래그 목적지
-    let dragTarget = null; // {index, x, y} or null
+    let dragTarget = null;     // {index, x, y} or null
     let dragging = false;
 
-    const APPLY_BUTTON   = document.getElementById('applyBtn');
-    const LOAD_BG_BUTTON = document.getElementById('loadBgBtn');
-
     // ---- 유틸 ----
-    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-    function degToRad(d) { return d * Math.PI / 180; }
+    function dist(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
 
     function getMousePos(e) {
       const rect = canvas.getBoundingClientRect();
@@ -234,368 +202,104 @@
       };
     }
 
-    // ---- 각도 계산 & 제한 ----
-    function angleAt(prev, joint, next) {
-      const v1x = prev.x - joint.x;
-      const v1y = prev.y - joint.y;
-      const v2x = next.x - joint.x;
-      const v2y = next.y - joint.y;
-      const dot = v1x * v2x + v1y * v2y;
-      const len1 = Math.hypot(v1x, v1y);
-      const len2 = Math.hypot(v2x, v2y);
-      if (len1 === 0 || len2 === 0) return Math.PI;
-      let c = dot / (len1 * len2);
-      c = Math.max(-1, Math.min(1, c));
-      return Math.acos(c);
+    function updateStatusLabels() {
+      nodeCountLabel.textContent = `Nodes: ${nodes.length}`;
+      if (buildingMode) {
+        modeLabel.textContent = "Mode: Building (캔버스를 클릭해서 노드를 추가하세요)";
+      } else if (systemActive) {
+        modeLabel.textContent = "Mode: IK (중간 노드를 드래그해서 움직이세요)";
+      } else {
+        modeLabel.textContent = "Mode: Idle";
+      }
+
+      applyBtn.disabled = !(buildingMode && nodes.length >= 2);
     }
 
-    function withinAngleLimits(p0, p1, p2, p3) {
-      const a1 = angleAt(p0, p1, p2);
-      const a2 = angleAt(p1, p2, p3);
-      if (a1 < joint1MinRad || a1 > joint1MaxRad) return false;
-      if (a2 < joint2MinRad || a2 > joint2MaxRad) return false;
-      return true;
-    }
-
-    // ---- 원 교점 ----
-    function circleCircleIntersection(x0, y0, r0, x1, y1, r1) {
-      const dx = x1 - x0;
-      const dy = y1 - y0;
-      const d  = Math.hypot(dx, dy);
-      if (d > r0 + r1 || d < Math.abs(r0 - r1) || d === 0) return null;
-
-      const a  = (r0*r0 - r1*r1 + d*d) / (2*d);
-      const h2 = r0*r0 - a*a;
-      if (h2 < 0) return null;
-      const h  = Math.sqrt(h2);
-
-      const xm = x0 + (a * dx) / d;
-      const ym = y0 + (a * dy) / d;
-
-      const rx = -dy * (h / d);
-      const ry =  dx * (h / d);
-
-      return [
-        { x: xm + rx, y: ym + ry },
-        { x: xm - rx, y: ym - ry }
-      ];
-    }
-
-    // ---- IK 해 계산 (노드 배열 반환 또는 null) ----
-    function computeSolution(index, tx, ty) {
-      const p0 = nodes[0];
-      const p1 = nodes[1];
-      const p2 = nodes[2];
-      const p3 = nodes[3];
-
-      const L01 = lengths[0];
-      const L12 = lengths[1];
-      const L23 = lengths[2];
-
-      const target = { x: tx, y: ty };
-
-      // 공통 루프 파라미터
-      const step = Math.max(1, Math.abs(ikStepDeg));
-
-      if (index === 1) {
-        // 1번: 0,3 고정 / 1,2 가변
-        let best = null;
-        let bestScore = Infinity;
-        const prevP2 = {...p2};
-
-        for (let deg = 0; deg < 360; deg += step) {
-          const rad = degToRad(deg);
-          const cand1 = {
-            x: p0.x + Math.cos(rad)*L01,
-            y: p0.y + Math.sin(rad)*L01
-          };
-          const solList = circleCircleIntersection(
-            cand1.x, cand1.y, L12,
-            p3.x, p3.y, L23
-          );
-          if (!solList) continue;
-
-          for (const cand2 of solList) {
-            if (!withinAngleLimits(p0, cand1, cand2, p3)) continue;
-            const err  = dist(cand1, target);
-            const cont = dist(cand2, prevP2);
-            const score = err + continuityWeight*cont;
-            if (score < bestScore) {
-              bestScore = score;
-              best = [p0, cand1, cand2, p3];
-            }
-          }
-        }
-        return (best && bestScore < ikTolerance) ? best : null;
-      }
-
-      if (index === 2) {
-        // 2번: 0,3 고정 / 1,2 가변
-        let best = null;
-        let bestScore = Infinity;
-        const prevP1 = {...p1};
-
-        for (let deg = 0; deg < 360; deg += step) {
-          const rad = degToRad(deg);
-          const cand2 = {
-            x: p3.x + Math.cos(rad)*L23,
-            y: p3.y + Math.sin(rad)*L23
-          };
-          const solList = circleCircleIntersection(
-            cand2.x, cand2.y, L12,
-            p0.x, p0.y, L01
-          );
-          if (!solList) continue;
-
-          for (const cand1 of solList) {
-            if (!withinAngleLimits(p0, cand1, cand2, p3)) continue;
-            const err  = dist(cand2, target);
-            const cont = dist(cand1, prevP1);
-            const score = err + continuityWeight*cont;
-            if (score < bestScore) {
-              bestScore = score;
-              best = [p0, cand1, cand2, p3];
-            }
-          }
-        }
-        return (best && bestScore < ikTolerance) ? best : null;
-      }
-
-      if (index === 0) {
-        // 0번: newP0 / 3 고정 / 1,2 가변
-        const newP0 = { x: tx, y: ty };
-        let best = null;
-        let bestScore = Infinity;
-        const prevP1 = {...p1};
-        const prevP2 = {...p2};
-
-        for (let deg = 0; deg < 360; deg += step) {
-          const rad = degToRad(deg);
-          const cand1 = {
-            x: newP0.x + Math.cos(rad)*L01,
-            y: newP0.y + Math.sin(rad)*L01
-          };
-          const solList = circleCircleIntersection(
-            cand1.x, cand1.y, L12,
-            p3.x, p3.y, L23
-          );
-          if (!solList) continue;
-
-          for (const cand2 of solList) {
-            if (!withinAngleLimits(newP0, cand1, cand2, p3)) continue;
-            const cont =
-              dist(cand1, prevP1) +
-              dist(cand2, prevP2);
-            if (cont < bestScore) {
-              bestScore = cont;
-              best = [newP0, cand1, cand2, p3];
-            }
-          }
-        }
-        return best;
-      }
-
-      if (index === 3) {
-        // 3번: newP3 / 0 고정 / 1,2 가변
-        const newP3 = { x: tx, y: ty };
-        let best = null;
-        let bestScore = Infinity;
-        const prevP1 = {...p1};
-        const prevP2 = {...p2};
-
-        for (let deg = 0; deg < 360; deg += step) {
-          const rad = degToRad(deg);
-          const cand2 = {
-            x: newP3.x + Math.cos(rad)*L23,
-            y: newP3.y + Math.sin(rad)*L23
-          };
-          const solList = circleCircleIntersection(
-            cand2.x, cand2.y, L12,
-            p0.x, p0.y, L01
-          );
-          if (!solList) continue;
-
-          for (const cand1 of solList) {
-            if (!withinAngleLimits(p0, cand1, cand2, newP3)) continue;
-            const cont =
-              dist(cand1, prevP1) +
-              dist(cand2, prevP2);
-            if (cont < bestScore) {
-              bestScore = cont;
-              best = [p0, cand1, cand2, newP3];
-            }
-          }
-        }
-        return best;
-      }
-
-      return null;
-    }
-
-    // ---- 드래그 이벤트 ----
-    canvas.addEventListener('mousedown', (e) => {
-      const { x, y } = getMousePos(e);
-      let closestIdx = null;
-      let closestDist = Infinity;
-
-      for (let i = 0; i < nodes.length; i++) {
-        const d = dist(nodes[i], {x, y});
-        if (d < closestDist) {
-          closestDist = d;
-          closestIdx = i;
-        }
-      }
-
-      if (closestDist < 20) {
-        dragging = true;
-        dragTarget = { index: closestIdx, x, y };
-      }
-    });
-
-    canvas.addEventListener('mousemove', (e) => {
-      if (!dragging || !dragTarget) return;
-      const { x, y } = getMousePos(e);
-      dragTarget.x = x;
-      dragTarget.y = y;
-    });
-
-    canvas.addEventListener('mouseup', () => {
+    // ---- 노드 초기화/리셋 ----
+    function resetNodes() {
+      nodes = [];
+      lengths = [];
+      buildingMode = true;
+      systemActive = false;
       dragging = false;
       dragTarget = null;
-    });
-    canvas.addEventListener('mouseleave', () => {
-      dragging = false;
-      dragTarget = null;
-    });
+      updateStatusLabels();
+    }
 
-    // ---- Apply 버튼 ----
-    APPLY_BUTTON.addEventListener('click', () => {
-      const getNum = (id, fallback) => {
-        const v = parseFloat(document.getElementById(id).value);
+    // ---- Advanced 설정 Apply (입력값 읽기) ----
+    function applyAdvancedSettingsFromInputs() {
+      const toNum = (el, fallback) => {
+        const v = parseFloat(el.value);
         return Number.isFinite(v) ? v : fallback;
       };
-
-      const n0x = getNum('n0x', nodes[0].x);
-      const n0y = getNum('n0y', nodes[0].y);
-      const n1x = getNum('n1x', nodes[1].x);
-      const n1y = getNum('n1y', nodes[1].y);
-      const n2x = getNum('n2x', nodes[2].x);
-      const n2y = getNum('n2y', nodes[2].y);
-      const n3x = getNum('n3x', nodes[3].x);
-      const n3y = getNum('n3y', nodes[3].y);
-
-      nodes = [
-        { x: n0x, y: n0y, fixedVisual: true  },
-        { x: n1x, y: n1y, fixedVisual: false },
-        { x: n2x, y: n2y, fixedVisual: false },
-        { x: n3x, y: n3y, fixedVisual: true  }
-      ];
-
-      lengths = [
-        dist(nodes[0], nodes[1]),
-        dist(nodes[1], nodes[2]),
-        dist(nodes[2], nodes[3])
-      ];
-
-      const j1min = getNum('j1min', 40);
-      const j1max = getNum('j1max', 160);
-      const j2min = getNum('j2min', 40);
-      const j2max = getNum('j2max', 160);
-
-      joint1MinRad = degToRad(j1min);
-      joint1MaxRad = degToRad(j1max);
-      joint2MinRad = degToRad(j2min);
-      joint2MaxRad = degToRad(j2max);
-
-      // Advanced
-      alpha = getNum('alphaInput', 0.25);
-      if (!Number.isFinite(alpha) || alpha <= 0) alpha = 0.25;
+      alpha = toNum(alphaInput, 0.25);
+      if (alpha <= 0) alpha = 0.1;
       if (alpha > 1) alpha = 1;
 
-      ikStepDeg = getNum('stepDegInput', 2);
-      if (!Number.isFinite(ikStepDeg) || ikStepDeg <= 0) ikStepDeg = 2;
+      iterations = Math.round(toNum(iterInput, 10));
+      if (iterations < 1) iterations = 1;
 
-      ikTolerance = getNum('tolInput', 50);
-      if (!Number.isFinite(ikTolerance) || ikTolerance < 0) ikTolerance = 50;
-
-      continuityWeight = getNum('contInput', 0.2);
-      if (!Number.isFinite(continuityWeight) || continuityWeight < 0) {
-        continuityWeight = 0.2;
-      }
-
-      dragging = false;
-      dragTarget = null;
-    });
-
-    // ---- 배경 이미지 로딩 ----
-    LOAD_BG_BUTTON.addEventListener('click', () => {
-      const url = document.getElementById('bgUrl').value.trim();
-      if (!url) {
-        bgImage = null;
-        bgLoaded = false;
-        // 이미지는 없지만 캔버스는 그대로 두고, 배경만 검정으로
-        return;
-      }
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        bgImage = img;
-        bgLoaded = true;
-
-        // 이미지 비율에 맞게 캔버스 크기 조정
-        const maxW = 880;
-        const maxH = 520;
-        let w = img.width;
-        let h = img.height;
-        const scale = Math.min(maxW / w, maxH / h, 1);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-
-        canvas.width  = w;
-        canvas.height = h;
-
-        // 새 캔버스 기준으로 노드 초기화 (가운데 수평선)
-        resetNodesForCanvas();
-        syncNodeInputs();
-      };
-      img.onerror = () => {
-        bgImage = null;
-        bgLoaded = false;
-      };
-      img.src = url;
-    });
-
-    function resetNodesForCanvas() {
-      const w = canvas.width;
-      const h = canvas.height;
-      const y = h * 0.5;
-
-      nodes = [
-        { x: w*0.2, y, fixedVisual: true  },
-        { x: w*0.4, y, fixedVisual: false },
-        { x: w*0.6, y, fixedVisual: false },
-        { x: w*0.8, y, fixedVisual: true  }
-      ];
-      lengths = [
-        dist(nodes[0], nodes[1]),
-        dist(nodes[1], nodes[2]),
-        dist(nodes[2], nodes[3])
-      ];
+      moveFactor = toNum(moveInput, 1.0);
+      if (moveFactor <= 0) moveFactor = 0.1;
     }
 
-    function syncNodeInputs() {
-      document.getElementById('n0x').value = nodes[0].x.toFixed(1);
-      document.getElementById('n0y').value = nodes[0].y.toFixed(1);
-      document.getElementById('n1x').value = nodes[1].x.toFixed(1);
-      document.getElementById('n1y').value = nodes[1].y.toFixed(1);
-      document.getElementById('n2x').value = nodes[2].x.toFixed(1);
-      document.getElementById('n2y').value = nodes[2].y.toFixed(1);
-      document.getElementById('n3x').value = nodes[3].x.toFixed(1);
-      document.getElementById('n3y').value = nodes[3].y.toFixed(1);
+    // ---- 길이 배열 계산 ----
+    function recomputeLengths() {
+      lengths = [];
+      for (let i = 0; i < nodes.length - 1; i++) {
+        lengths.push(dist(nodes[i], nodes[i+1]));
+      }
     }
 
-    // ---- 렌더링 ----
+    // ---- PBD 스타일 길이제약 + 타겟으로 끌기 ----
+    function solveTowardsTarget(targetIndex, targetX, targetY) {
+      const n = nodes.length;
+      if (n < 2) return nodes;
+
+      // 클론
+      const P = nodes.map(p => ({ x: p.x, y: p.y, fixed: p.fixed }));
+
+      // 1) 타겟 노드를 목적지로 이동 (강도 조절)
+      const t = P[targetIndex];
+      t.x += moveFactor * (targetX - t.x);
+      t.y += moveFactor * (targetY - t.y);
+
+      // 2) 여러 번 길이 제약 반복
+      for (let iter = 0; iter < iterations; iter++) {
+        for (let i = 0; i < n - 1; i++) {
+          const a = P[i];
+          const b = P[i+1];
+          const rest = lengths[i];
+
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let d = Math.hypot(dx, dy);
+          if (d === 0) continue;
+
+          const diff = (d - rest) / d;  // 양수면 늘어났다는 뜻
+
+          const invMassA = a.fixed ? 0 : 1;
+          const invMassB = b.fixed ? 0 : 1;
+          const invSum = invMassA + invMassB;
+          if (invSum === 0) continue;
+
+          const offsetX = diff * dx;
+          const offsetY = diff * dy;
+
+          if (invMassA > 0) {
+            a.x += -offsetX * (invMassA / invSum);
+            a.y += -offsetY * (invMassA / invSum);
+          }
+          if (invMassB > 0) {
+            b.x +=  offsetX * (invMassB / invSum);
+            b.y +=  offsetY * (invMassB / invSum);
+          }
+        }
+      }
+      return P;
+    }
+
+    // ---- 드로잉 ----
     function draw() {
       // 배경
       if (bgLoaded && bgImage) {
@@ -605,52 +309,191 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
 
-      // 기준선 (0-3)
-      ctx.save();
-      ctx.strokeStyle = '#333';
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.moveTo(nodes[0].x, nodes[0].y);
-      ctx.lineTo(nodes[3].x, nodes[3].y);
-      ctx.stroke();
-      ctx.restore();
-
-      // 링크
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#4fc3f7';
-      ctx.beginPath();
-      ctx.moveTo(nodes[0].x, nodes[0].y);
-      for (let i = 1; i < nodes.length; i++) {
-        ctx.lineTo(nodes[i].x, nodes[i].y);
-      }
-      ctx.stroke();
-
-      // 노드
-      nodes.forEach((node, i) => {
+      // 빌딩 모드든 IK 모드든, 현재 nodes를 그리자
+      if (nodes.length > 0) {
+        // 라인
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#4fc3f7';
         ctx.beginPath();
-        const isTarget = dragTarget && dragTarget.index === i;
-        const r = isTarget ? 9 : 7;
-        if (node.fixedVisual) {
-          ctx.fillStyle = isTarget ? '#ffca28' : '#b0bec5';
-        } else {
-          ctx.fillStyle = isTarget ? '#ff5252' : '#64b5f6';
+        ctx.moveTo(nodes[0].x, nodes[0].y);
+        for (let i = 1; i < nodes.length; i++) {
+          ctx.lineTo(nodes[i].x, nodes[i].y);
         }
-        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.stroke();
 
-        ctx.fillStyle = '#fff';
+        // 노드
+        nodes.forEach((node, i) => {
+          ctx.beginPath();
+          const isTarget = dragTarget && dragTarget.index === i;
+          const r = isTarget ? 8 : 6;
+
+          if (!systemActive) {
+            // 아직 시스템 미적용: 전부 동일색
+            ctx.fillStyle = isTarget ? '#ff5252' : '#90caf9';
+          } else {
+            // 시스템 적용 후: 끝점/중간색 구분
+            if (i === 0 || i === nodes.length - 1) {
+              ctx.fillStyle = isTarget ? '#ffca28' : '#b0bec5';
+            } else {
+              ctx.fillStyle = isTarget ? '#ff5252' : '#64b5f6';
+            }
+          }
+          ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#fff';
+          ctx.font = '11px system-ui';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(i.toString(), node.x, node.y - r - 2);
+        });
+      }
+
+      // 빌딩 모드 안내 텍스트 (캔버스 안에 살짝)
+      if (buildingMode) {
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
         ctx.font = '12px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(i.toString(), node.x, node.y - r - 2);
-      });
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('Click to add nodes in order (0,1,2,...).', 10, 10);
+      }
     }
+
+    // ---- 이벤트: 캔버스 클릭/드래그 ----
+    canvas.addEventListener('mousedown', (e) => {
+      const pos = getMousePos(e);
+
+      if (buildingMode) {
+        // 노드 찍기
+        nodes.push({ x: pos.x, y: pos.y, fixed: false });
+        updateStatusLabels();
+        draw();
+        return;
+      }
+
+      if (!systemActive) return;
+
+      // IK 모드: 중간 노드만 드래그 가능 (1 ~ N-2)
+      if (nodes.length < 3) return;
+
+      let closestIdx = null;
+      let closestDist = Infinity;
+
+      for (let i = 1; i < nodes.length - 1; i++) {
+        const d = dist(nodes[i], pos);
+        if (d < closestDist) {
+          closestDist = d;
+          closestIdx = i;
+        }
+      }
+
+      if (closestIdx !== null && closestDist < 20) {
+        dragging = true;
+        dragTarget = { index: closestIdx, x: pos.x, y: pos.y };
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!dragging || !dragTarget) return;
+      const pos = getMousePos(e);
+      dragTarget.x = pos.x;
+      dragTarget.y = pos.y;
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      dragging = false;
+      dragTarget = null;
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      dragging = false;
+      dragTarget = null;
+    });
+
+    // ---- 버튼: Reset ----
+    resetBtn.addEventListener('click', () => {
+      resetNodes();
+    });
+
+    // ---- 버튼: Apply System ----
+    applyBtn.addEventListener('click', () => {
+      if (nodes.length < 2) return;
+      // 0, N-1 고정
+      nodes.forEach((n, i) => {
+        n.fixed = (i === 0 || i === nodes.length - 1);
+      });
+      recomputeLengths();
+      buildingMode = false;
+      systemActive = true;
+      dragging = false;
+      dragTarget = null;
+      updateStatusLabels();
+    });
+
+    // ---- Advanced 입력 변경시 즉시 반영 (원하면 Apply 버튼으로 바꿔도 됨) ----
+    alphaInput.addEventListener('change', applyAdvancedSettingsFromInputs);
+    iterInput.addEventListener('change', applyAdvancedSettingsFromInputs);
+    moveInput.addEventListener('change', applyAdvancedSettingsFromInputs);
+    applyAdvancedSettingsFromInputs();
+
+    // ---- 배경 이미지 로딩 ----
+    loadBgBtn.addEventListener('click', () => {
+      const url = bgUrlInput.value.trim();
+      if (!url) {
+        bgImage = null;
+        bgLoaded = false;
+        return;
+      }
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const oldW = canvas.width;
+        const oldH = canvas.height;
+
+        bgImage = img;
+        bgLoaded = true;
+
+        const maxW = 900;
+        const maxH = 600;
+        let w = img.width;
+        let h = img.height;
+        const scale = Math.min(maxW / w, maxH / h, 1);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+
+        canvas.width = w;
+        canvas.height = h;
+
+        // 기존 노드가 있다면 비율에 맞게 스케일링
+        if (nodes.length > 0 && oldW > 0 && oldH > 0) {
+          const sx = w / oldW;
+          const sy = h / oldH;
+          nodes.forEach(n => {
+            n.x *= sx;
+            n.y *= sy;
+          });
+          if (systemActive) {
+            // 길이 다시 계산 (스케일 반영)
+            recomputeLengths();
+          }
+        }
+
+        draw();
+      };
+      img.onerror = () => {
+        bgImage = null;
+        bgLoaded = false;
+      };
+      img.src = url;
+    });
 
     // ---- 메인 루프 ----
     function loop() {
-      if (dragTarget) {
-        const sol = computeSolution(dragTarget.index, dragTarget.x, dragTarget.y);
+      if (systemActive && dragTarget) {
+        const sol = solveTowardsTarget(dragTarget.index, dragTarget.x, dragTarget.y);
         if (sol) {
+          // 부드럽게 수렴
           for (let i = 0; i < nodes.length; i++) {
             nodes[i].x += alpha * (sol[i].x - nodes[i].x);
             nodes[i].y += alpha * (sol[i].y - nodes[i].y);
@@ -661,8 +504,8 @@
       requestAnimationFrame(loop);
     }
 
-    // 초기 그리기 + 루프 시작
-    syncNodeInputs();
+    // 초기 상태
+    resetNodes();
     draw();
     loop();
   </script>
