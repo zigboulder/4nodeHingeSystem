@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>PBD Chain Simulator (Triangle Bending + Orientation)</title>
+  <title>PBD Chain Simulator (Stable Layout + Scene Save)</title>
   <style>
     html, body {
       margin: 0;
@@ -30,7 +30,7 @@
       flex-direction: column;
       gap: 10px;
       font-size: 13px;
-      overflow-y: auto;      /* 스크롤 */
+      overflow-y: auto;
       max-height: 100vh;
     }
 
@@ -57,7 +57,7 @@
       flex: 1 1 auto;
     }
 
-    input[type="number"] {
+    input[type="number"], input[type="text"] {
       width: 90px;
       padding: 2px 4px;
       background: #222;
@@ -65,6 +65,16 @@
       color: #eee;
       border-radius: 4px;
       font-size: 12px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+    }
+
+    input[type="file"] {
+      width: 100%;
+      font-size: 11px;
+      color: #ccc;
     }
 
     input[type="checkbox"] {
@@ -118,7 +128,6 @@
       width: 100%;
       height: 100%;
       display: block;
-      background: radial-gradient(circle at top, #222 0, #050509 60%);
       cursor: crosshair;
     }
 
@@ -146,6 +155,17 @@
     .small {
       font-size: 11px;
       color: #aaa;
+    }
+
+    .row-stretch {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+      align-items: center;
+    }
+
+    .row-stretch > input[type="text"] {
+      flex: 1;
     }
   </style>
 </head>
@@ -201,7 +221,7 @@
       <input id="dragStiffnessInput" type="number" step="0.01" min="0" max="1" value="0.5">
     </label>
     <label>
-      <span>Show bending springs</span>
+      <span>Show bending base lines</span>
       <input id="showBendingInput" type="checkbox" checked>
     </label>
 
@@ -223,6 +243,30 @@
     <div class="row">
       <button id="bendApplyNodeBtn">Apply to Node</button>
     </div>
+
+    <h2>Background Image</h2>
+    <div class="small">
+      시뮬레이션 캔버스 뒤에 깔릴<br>
+      배경 이미지 URL을 넣어주세요.
+    </div>
+    <input id="bgUrlInput" type="text" placeholder="https://example.com/image.jpg">
+    <div class="row">
+      <button id="bgSetBtn">Set Background</button>
+      <button id="bgClearBtn">Clear</button>
+    </div>
+
+    <h2>Scene Save / Load</h2>
+    <div class="small">
+      현재 체인 + 설정 + 배경 이미지를<br>
+      하나의 씬 파일로 저장/로드합니다.<br>
+      확장자: <b>.pbdscene</b>
+    </div>
+    <div class="row-stretch">
+      <input id="sceneNameInput" type="text" placeholder="scene 이름 (옵션)">
+      <button id="saveSceneBtn" class="primary">Save</button>
+    </div>
+    <div class="small" style="margin-top:4px;">Load from file:</div>
+    <input id="sceneFileInput" type="file" accept=".pbdscene,.json">
 
     <h2>상태</h2>
     <div id="statusBox"></div>
@@ -246,59 +290,28 @@
 (function() {
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
-
-  function resizeCanvas() {
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  window.addEventListener("resize", resizeCanvas);
-  resizeCanvas();
-
-  // UI elements
-  const targetCountInput = document.getElementById("targetCountInput");
-  const nodeCountInfo = document.getElementById("nodeCountInfo");
-  const btnApply = document.getElementById("btnApply");
-  const btnReset = document.getElementById("btnReset");
-
-  const dtInput = document.getElementById("dtInput");
-  const gravityInput = document.getElementById("gravityInput");
-  const iterInput = document.getElementById("iterInput");
-  const dampingInput = document.getElementById("dampingInput");
-  const stiffnessInput = document.getElementById("stiffnessInput");
-  const bendingStiffnessInput = document.getElementById("bendingStiffnessInput");
-  const dragStiffnessInput = document.getElementById("dragStiffnessInput");
-  const showBendingInput = document.getElementById("showBendingInput");
-
-  const bendNodeIndexInput = document.getElementById("bendNodeIndexInput");
-  const bendNodeValueInput = document.getElementById("bendNodeValueInput");
-  const bendApplyNodeBtn = document.getElementById("bendApplyNodeBtn");
-
-  const statusBox = document.getElementById("statusBox");
-
-  // Simulation state
-  let nodes = [];              // {x,y,prevX,prevY,invMass,pinned}
-  let constraints = [];        // stretch: {i1,i2,restLength}
-  let bendingEdgeConstraints = [];       // {i1,i2,restLength,j}
-  let bendingOrientationConstraints = []; // {i0,i1,i2,restDist,j}
-  let bendingStiffnessPerNode = [];     // index by j
-
   const nodeRadius = 8;
 
-  let mode = "editing"; // "editing" | "ready" | "running"
+  // ---- State variables (먼저 선언) ----------------------------------------
+  let bgImage = null;
+  let bgImageLoaded = false;
+  let sceneRect = null;
 
+  let nodes = [];              // {x,y,prevX,prevY,invMass,pinned}
+  let constraints = [];        // stretch
+  let bendingEdgeConstraints = [];
+  let bendingOrientationConstraints = [];
+  let bendingStiffnessPerNode = [];
+
+  let mode = "editing"; // "editing" | "ready" | "running"
   let isDragging = false;
   let draggedIndex = -1;
   let mousePos = { x: 0, y: 0 };
-
-  // space로 토글되는 전역 재생 상태
   let simPlaying = false;
-
   let lastTime = null;
   let simStartedOnce = false;
 
+  // ---- Functions -----------------------------------------------------------
   function clamp01(v) {
     v = Number.isFinite(v) ? v : 0;
     if (v < 0) return 0;
@@ -306,141 +319,64 @@
     return v;
   }
 
-  function setStatus() {
-    const lines = [];
-    lines.push(`모드: ${mode}`);
-    lines.push(`노드 수: ${nodes.length}`);
-    lines.push(`Space 재생: ${simPlaying ? "ON" : "OFF"}`);
-    lines.push(simStartedOnce ? "시뮬레이션: 활성화됨" : "시뮬레이션: 아직 시작 전");
-    if (isDragging && draggedIndex >= 0) {
-      lines.push(`드래그 중인 노드: #${draggedIndex}`);
-    }
-    statusBox.textContent = lines.join("\n");
-    nodeCountInfo.textContent = `현재 노드: ${nodes.length} / 목표: ${targetCountInput.value}`;
+  function resizeCanvasToElement() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  function resetAll() {
-    nodes = [];
-    constraints = [];
-    bendingEdgeConstraints = [];
-    bendingOrientationConstraints = [];
-    bendingStiffnessPerNode = [];
-    mode = "editing";
-    isDragging = false;
-    draggedIndex = -1;
-    simStartedOnce = false;
-    simPlaying = false;
-    lastTime = null;
-    setStatus();
-    draw();
+  function computeSceneRect() {
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (bgImageLoaded && bgImage && bgImage.width > 0 && bgImage.height > 0) {
+      const iw = bgImage.width;
+      const ih = bgImage.height;
+      const scale = Math.max(w / iw, h / ih);
+      const dw = iw * scale;
+      const dh = ih * scale;
+      const dx = (w - dw) * 0.5;
+      const dy = (h - dh) * 0.5;
+      return { x: dx, y: dy, w: dw, h: dh };
+    } else {
+      return { x: 0, y: 0, w, h };
+    }
   }
 
-  btnReset.addEventListener("click", resetAll);
+  function rescaleNodesAndRest(oldRect, newRect) {
+    if (!oldRect || !newRect) return;
+    if (oldRect.w <= 0 || oldRect.h <= 0) return;
+    if (!nodes.length) return;
 
-  btnApply.addEventListener("click", () => {
-    if (nodes.length < 2) {
-      alert("노드를 최소 2개 이상 만들어야 합니다.");
-      return;
-    }
-    constraints = [];
-    bendingEdgeConstraints = [];
-    bendingOrientationConstraints = [];
+    const sx = newRect.w / oldRect.w;
+    const sy = newRect.h / oldRect.h;
+    const sLen = (sx + sy) * 0.5;
 
-    // 1) stretch constraints (연속 노드)
-    for (let i = 0; i < nodes.length - 1; i++) {
-      const a = nodes[i];
-      const b = nodes[i+1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.hypot(dx, dy) || 1;
-      constraints.push({ i1: i, i2: i+1, restLength: len });
-    }
-
-    // 2) bending triple constraints
-    const globalBending = clamp01(parseFloat(bendingStiffnessInput.value || "0.3"));
-    bendingStiffnessPerNode = new Array(nodes.length).fill(globalBending);
-
-    if (nodes.length >= 3) {
-      for (let j = 1; j <= nodes.length - 2; j++) {
-        const iPrev = j - 1;
-        const iMid  = j;
-        const iNext = j + 1;
-
-        const pPrev = nodes[iPrev];
-        const pMid  = nodes[iMid];
-        const pNext = nodes[iNext];
-
-        // 3개의 밴딩 edge 스프링
-        const dx01 = pMid.x  - pPrev.x;
-        const dy01 = pMid.y  - pPrev.y;
-        const dx12 = pNext.x - pMid.x;
-        const dy12 = pNext.y - pMid.y;
-        const dx02 = pNext.x - pPrev.x;
-        const dy02 = pNext.y - pPrev.y;
-
-        const len01 = Math.hypot(dx01, dy01) || 1;
-        const len12 = Math.hypot(dx12, dy12) || 1;
-        const len02 = Math.hypot(dx02, dy02) || 1;
-
-        bendingEdgeConstraints.push({ i1: iPrev, i2: iMid,  restLength: len01, j });
-        bendingEdgeConstraints.push({ i1: iMid,  i2: iNext, restLength: len12, j });
-        bendingEdgeConstraints.push({ i1: iPrev, i2: iNext, restLength: len02, j });
-
-        // 방향 + signed distance 유지용 constraint
-        const lenAC = Math.hypot(dx02, dy02);
-        if (lenAC > 1e-6) {
-          const ux = dx02 / lenAC;
-          const uy = dy02 / lenAC;     // ac 방향 단위 벡터
-          const apx = pMid.x - pPrev.x;
-          const apy = pMid.y - pPrev.y;
-          // signed distance: (b-a) × u
-          const restDist = apx * uy - apy * ux;
-          bendingOrientationConstraints.push({
-            i0: iPrev,
-            i1: iMid,
-            i2: iNext,
-            restDist,
-            j
-          });
-        }
-      }
-    }
-
-    // verlet 초기화
     for (const n of nodes) {
-      n.prevX = n.x;
-      n.prevY = n.y;
-      if (n.invMass === undefined) n.invMass = 1;
-      if (n.pinned === undefined) n.pinned = false;
+      const u = (n.x - oldRect.x) / oldRect.w;
+      const v = (n.y - oldRect.y) / oldRect.h;
+      n.x = newRect.x + u * newRect.w;
+      n.y = newRect.y + v * newRect.h;
+
+      const up = (n.prevX - oldRect.x) / oldRect.w;
+      const vp = (n.prevY - oldRect.y) / oldRect.h;
+      n.prevX = newRect.x + up * newRect.w;
+      n.prevY = newRect.y + vp * newRect.h;
     }
 
-    mode = "ready";
-    setStatus();
-    draw();
-  });
+    for (const c of constraints) {
+      c.restLength *= sLen;
+    }
+    for (const c of bendingEdgeConstraints) {
+      c.restLength *= sLen;
+    }
+    for (const c of bendingOrientationConstraints) {
+      c.restDist *= sLen;
+    }
+  }
 
-  // per-node bending 강도 설정
-  bendApplyNodeBtn.addEventListener("click", () => {
-    const j = parseInt(bendNodeIndexInput.value || "0", 10);
-    if (!Number.isFinite(j)) return;
-    if (nodes.length < 3) {
-      alert("먼저 노드를 최소 3개 만들고 Apply를 눌러주세요.");
-      return;
-    }
-    if (j < 1 || j > nodes.length - 2) {
-      alert(`유효한 j 범위는 1 ~ ${nodes.length - 2} 입니다.`);
-      return;
-    }
-    const v = clamp01(parseFloat(bendNodeValueInput.value || "0"));
-    if (!bendingStiffnessPerNode || bendingStiffnessPerNode.length === 0) {
-      const globalBending = clamp01(parseFloat(bendingStiffnessInput.value || "0.3"));
-      bendingStiffnessPerNode = new Array(nodes.length).fill(globalBending);
-    }
-    bendingStiffnessPerNode[j] = v;
-    setStatus();
-  });
-
-  // Utility: canvas 좌표
   function getMousePos(evt) {
     const rect = canvas.getBoundingClientRect();
     return {
@@ -449,7 +385,6 @@
     };
   }
 
-  // 노드 찾기
   function findNodeAt(pos, radius) {
     let closest = -1;
     let minDist = Infinity;
@@ -466,102 +401,8 @@
     return closest;
   }
 
-  // 마우스 이벤트
-  canvas.addEventListener("mousedown", (evt) => {
-    const pos = getMousePos(evt);
-    mousePos = pos;
-
-    if (evt.shiftKey) {
-      // Shift + 클릭: 핀 토글
-      const idx = findNodeAt(pos, nodeRadius * 1.5);
-      if (idx >= 0) {
-        nodes[idx].pinned = !nodes[idx].pinned;
-        nodes[idx].invMass = nodes[idx].pinned ? 0 : 1;
-        setStatus();
-        draw();
-      }
-      return;
-    }
-
-    if (mode === "editing") {
-      const targetCount = parseInt(targetCountInput.value || "0", 10);
-      if (Number.isNaN(targetCount) || targetCount <= 0) {
-        alert("목표 노드 수 N을 올바르게 입력하세요.");
-        return;
-      }
-      if (nodes.length >= targetCount) {
-        alert("이미 목표 노드 수만큼 생성했습니다. Apply 또는 Reset을 눌러주세요.");
-        return;
-      }
-      nodes.push({
-        x: pos.x,
-        y: pos.y,
-        prevX: pos.x,
-        prevY: pos.y,
-        invMass: 1,
-        pinned: false
-      });
-      setStatus();
-      draw();
-    } else {
-      // ready / running 상태: 드래그 시작
-      const idx = findNodeAt(pos, nodeRadius * 1.5);
-      if (idx >= 0) {
-        isDragging = true;
-        draggedIndex = idx;
-        simStartedOnce = true;
-        const n = nodes[idx];
-        n.prevX = n.x;
-        n.prevY = n.y;
-        mode = "running";
-        setStatus();
-      }
-    }
-  });
-
-  canvas.addEventListener("mousemove", (evt) => {
-    const pos = getMousePos(evt);
-    mousePos = pos;
-    // 노드는 drag 스프링으로 끌려오므로 직접 세팅 안 함
-  });
-
-  canvas.addEventListener("mouseup", () => {
-    isDragging = false;
-    draggedIndex = -1;
-    if (!simPlaying && mode === "running") {
-      mode = "ready";
-    }
-    setStatus();
-  });
-
-  canvas.addEventListener("mouseleave", () => {
-    isDragging = false;
-    draggedIndex = -1;
-    if (!simPlaying && mode === "running") {
-      mode = "ready";
-    }
-    setStatus();
-  });
-
-  // 키보드: Space로 재생/일시정지 토글
-  window.addEventListener("keydown", (evt) => {
-    if (evt.code === "Space") {
-      evt.preventDefault();
-      if (mode === "editing") return;
-      simPlaying = !simPlaying;
-      if (simPlaying && mode === "ready") {
-        mode = "running";
-      } else if (!simPlaying && !isDragging) {
-        mode = "ready";
-      }
-      setStatus();
-    }
-  });
-
-  // PBD step: simPlaying 또는 드래그 중이면 동작
   function stepSimulation(dt) {
-    if (nodes.length === 0) return;
-    if (mode !== "running") return;
+    if (!nodes.length || mode !== "running") return;
 
     const gravity = parseFloat(gravityInput.value || "0");
     const iterations = Math.max(1, parseInt(iterInput.value || "1", 10));
@@ -570,7 +411,7 @@
     const dragStiff = clamp01(parseFloat(dragStiffnessInput.value || "0.5"));
     const globalBending = clamp01(parseFloat(bendingStiffnessInput.value || "0.3"));
 
-    // 1. External forces + verlet integration
+    // 1. External forces + verlet
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       if (n.pinned) continue;
@@ -589,9 +430,9 @@
       n.y += vy;
     }
 
-    // 2. Constraints + drag spring
+    // 2. Constraints
     for (let it = 0; it < iterations; it++) {
-      // 2-1) stretch constraints
+      // stretch
       for (const c of constraints) {
         const n1 = nodes[c.i1];
         const n2 = nodes[c.i2];
@@ -626,7 +467,7 @@
         }
       }
 
-      // 2-2) bending edge constraints (삼각형의 3개 스프링)
+      // bending edges
       for (const bc of bendingEdgeConstraints) {
         const n1 = nodes[bc.i1];
         const n2 = nodes[bc.i2];
@@ -665,16 +506,13 @@
         }
       }
 
-      // 2-3) orientation / signed-distance constraint
+      // orientation / signed distance
       for (const oc of bendingOrientationConstraints) {
-        const i0 = oc.i0;
-        const im = oc.i1;
-        const i2 = oc.i2;
-        const a = nodes[i0];
-        const b = nodes[im];
-        const c = nodes[i2];
+        const a = nodes[oc.i0];
+        const b = nodes[oc.i1];
+        const c = nodes[oc.i2];
 
-        if (b.pinned) continue; // 중앙 노드 고정이면 그냥 skip (원하면 분배도 가능)
+        if (b.pinned) continue;
 
         const acx = c.x - a.x;
         const acy = c.y - a.y;
@@ -694,10 +532,9 @@
           ? clamp01(bendingStiffnessPerNode[oc.j])
           : globalBending;
 
-        const stiffnessFactor = kNode; // 각도 필은 조금 더 강해도 됨
+        const stiffnessFactor = kNode;
         const delta = diff * stiffnessFactor;
 
-        // 기준선 AC에 수직인 단위벡터 n = perp(u)
         const nx = -uy;
         const ny = ux;
 
@@ -705,7 +542,7 @@
         b.y += ny * delta;
       }
 
-      // 2-4) drag 스프링 (rest=0, 노드-마우스)
+      // drag spring
       if (isDragging && draggedIndex >= 0) {
         const n = nodes[draggedIndex];
         if (!n.pinned) {
@@ -716,7 +553,6 @@
     }
   }
 
-  // 화살표 그리기 유틸
   function drawArrow(fromX, fromY, toX, toY, color) {
     const dx = toX - fromX;
     const dy = toY - fromY;
@@ -748,30 +584,54 @@
     ctx.fill();
   }
 
+  function drawBackground() {
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+
+    // gradient
+    const grad = ctx.createRadialGradient(
+      w * 0.5, h * 0.0, 0,
+      w * 0.5, h * 0.3, Math.max(w, h) * 0.9
+    );
+    grad.addColorStop(0, "#222");
+    grad.addColorStop(1, "#050509");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // bg image
+    if (bgImageLoaded && bgImage && sceneRect) {
+      ctx.drawImage(bgImage, sceneRect.x, sceneRect.y, sceneRect.w, sceneRect.h);
+    }
+  }
+
   function draw() {
     const rect = canvas.getBoundingClientRect();
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    const w = rect.width;
+    const h = rect.height;
 
-    // 배경 그리드
+    drawBackground();
+
+    // grid
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.04)";
     ctx.lineWidth = 1;
     const gridSize = 40;
-    for (let x = 0; x < rect.width; x += gridSize) {
+    for (let x = 0; x < w; x += gridSize) {
       ctx.beginPath();
       ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, rect.height);
+      ctx.lineTo(x + 0.5, h);
       ctx.stroke();
     }
-    for (let y = 0; y < rect.height; y += gridSize) {
+    for (let y = 0; y < h; y += gridSize) {
       ctx.beginPath();
       ctx.moveTo(0, y + 0.5);
-      ctx.lineTo(rect.width, y + 0.5);
+      ctx.lineTo(w, y + 0.5);
       ctx.stroke();
     }
     ctx.restore();
 
-    // stretch 체인
+    // chain
     ctx.save();
     ctx.lineWidth = 2;
     ctx.strokeStyle = "rgba(96,165,250,0.8)";
@@ -785,51 +645,24 @@
     }
     ctx.restore();
 
-    // bending 삼각형의 (j-1)-(j+1) 기저선 점선
-    if (showBendingInput.checked) {
+    // bending base lines
+    if (showBendingInput && showBendingInput.checked) {
       ctx.save();
       ctx.setLineDash([4, 4]);
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = "rgba(244,114,182,0.8)";
       for (const oc of bendingOrientationConstraints) {
         const a = nodes[oc.i0];
-        const c = nodes[oc.i2];
+        const c2 = nodes[oc.i2];
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
-        ctx.lineTo(c.x, c.y);
+        ctx.lineTo(c2.x, c2.y);
         ctx.stroke();
       }
       ctx.restore();
     }
 
-    // stretch 장력/압축 화살표
-    const eps = 1.0;
-    const tensionColor = "rgba(248,113,113,0.9)";    // red
-    const compressionColor = "rgba(52,211,153,0.9)"; // green
-
-    for (const c of constraints) {
-      const a = nodes[c.i1];
-      const b = nodes[c.i2];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist === 0) continue;
-
-      const midX = (a.x + b.x) * 0.5;
-      const midY = (a.y + b.y) * 0.5;
-
-      if (dist > c.restLength + eps) {
-        // 장력: 중앙 → 양 끝
-        drawArrow(midX, midY, a.x, a.y, tensionColor);
-        drawArrow(midX, midY, b.x, b.y, tensionColor);
-      } else if (dist < c.restLength - eps) {
-        // 압축: 양 끝 → 중앙
-        drawArrow(a.x, a.y, midX, midY, compressionColor);
-        drawArrow(b.x, b.y, midX, midY, compressionColor);
-      }
-    }
-
-    // 노드
+    // nodes
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       const r = nodeRadius;
@@ -855,9 +688,187 @@
       ctx.textBaseline = "middle";
       ctx.fillText(i.toString(), n.x, n.y);
     }
+
+    // tension/compression arrows
+    const eps = 1.0;
+    const tensionColor = "rgba(248,113,113,0.9)";
+    const compressionColor = "rgba(52,211,153,0.9)";
+
+    for (const c of constraints) {
+      const a = nodes[c.i1];
+      const b = nodes[c.i2];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist === 0) continue;
+
+      const midX = (a.x + b.x) * 0.5;
+      const midY = (a.y + b.y) * 0.5;
+
+      if (dist > c.restLength + eps) {
+        drawArrow(midX, midY, 0.5*(midX + a.x), 0.5*(midY + a.y), tensionColor);
+        drawArrow(midX, midY, 0.5*(midX + b.x), 0.5*(midY + b.y), tensionColor);
+      } else if (dist < c.restLength - eps) {
+        drawArrow(0.5*(midX + a.x), 0.5*(midY + a.y), midX, midY, compressionColor);
+        drawArrow(0.5*(midX + b.x), 0.5*(midY + b.y), midX, midY, compressionColor);
+      }
+    }
   }
 
-  // Main loop
+  function setStatus() {
+    const lines = [];
+    lines.push(`모드: ${mode}`);
+    lines.push(`노드 수: ${nodes.length}`);
+    lines.push(`Space 재생: ${simPlaying ? "ON" : "OFF"}`);
+    lines.push(simStartedOnce ? "시뮬레이션: 활성화됨" : "시뮬레이션: 아직 시작 전");
+    if (isDragging && draggedIndex >= 0) {
+      lines.push(`드래그 중인 노드: #${draggedIndex}`);
+    }
+    lines.push(`배경 이미지: ${bgImageLoaded ? "사용 중" : "없음"}`);
+    statusBox.textContent = lines.join("\n");
+    nodeCountInfo.textContent = `현재 노드: ${nodes.length} / 목표: ${targetCountInput.value}`;
+  }
+
+  function resetAll() {
+    nodes = [];
+    constraints = [];
+    bendingEdgeConstraints = [];
+    bendingOrientationConstraints = [];
+    bendingStiffnessPerNode = [];
+    mode = "editing";
+    isDragging = false;
+    draggedIndex = -1;
+    simStartedOnce = false;
+    simPlaying = false;
+    lastTime = null;
+    setStatus();
+    draw();
+  }
+
+  function buildSceneObject() {
+    return {
+      version: 1,
+      nodes: nodes.map(n => ({
+        x: n.x,
+        y: n.y,
+        prevX: n.prevX,
+        prevY: n.prevY,
+        invMass: n.invMass,
+        pinned: n.pinned
+      })),
+      constraints: constraints.map(c => ({...c})),
+      bendingEdgeConstraints: bendingEdgeConstraints.map(c => ({...c})),
+      bendingOrientationConstraints: bendingOrientationConstraints.map(c => ({...c})),
+      bendingStiffnessPerNode: (bendingStiffnessPerNode || []).slice(),
+      settings: {
+        dt: dtInput.value,
+        gravity: gravityInput.value,
+        iterations: iterInput.value,
+        damping: dampingInput.value,
+        stretchStiffness: stiffnessInput.value,
+        bendingStiffness: bendingStiffnessInput.value,
+        dragStiffness: dragStiffnessInput.value,
+        targetCount: targetCountInput.value
+      },
+      background: {
+        url: bgUrlInput.value || null
+      }
+    };
+  }
+
+  function loadSceneObject(scene) {
+    if (!scene || !Array.isArray(scene.nodes)) {
+      throw new Error("올바르지 않은 씬 포맷입니다.");
+    }
+
+    nodes = scene.nodes.map(n => ({
+      x: n.x,
+      y: n.y,
+      prevX: n.prevX ?? n.x,
+      prevY: n.prevY ?? n.y,
+      invMass: n.invMass ?? 1,
+      pinned: !!n.pinned
+    }));
+
+    constraints = Array.isArray(scene.constraints)
+      ? scene.constraints.map(c => ({...c}))
+      : [];
+    bendingEdgeConstraints = Array.isArray(scene.bendingEdgeConstraints)
+      ? scene.bendingEdgeConstraints.map(c => ({...c}))
+      : [];
+    bendingOrientationConstraints = Array.isArray(scene.bendingOrientationConstraints)
+      ? scene.bendingOrientationConstraints.map(c => ({...c}))
+      : [];
+    bendingStiffnessPerNode = Array.isArray(scene.bendingStiffnessPerNode)
+      ? scene.bendingStiffnessPerNode.slice()
+      : new Array(nodes.length).fill(
+          clamp01(parseFloat(bendingStiffnessInput.value || "0.3"))
+        );
+
+    const s = scene.settings || {};
+    if (s.dt !== undefined) dtInput.value = s.dt;
+    if (s.gravity !== undefined) gravityInput.value = s.gravity;
+    if (s.iterations !== undefined) iterInput.value = s.iterations;
+    if (s.damping !== undefined) dampingInput.value = s.damping;
+    if (s.stretchStiffness !== undefined) stiffnessInput.value = s.stretchStiffness;
+    if (s.bendingStiffness !== undefined) bendingStiffnessInput.value = s.bendingStiffness;
+    if (s.dragStiffness !== undefined) dragStiffnessInput.value = s.dragStiffness;
+    if (s.targetCount !== undefined) targetCountInput.value = s.targetCount;
+
+    const bg = scene.background || {};
+    if (bg.url) {
+      bgUrlInput.value = bg.url;
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const oldRect = sceneRect ? { ...sceneRect } : null;
+        bgImage = img;
+        bgImageLoaded = true;
+        const newRect = computeSceneRect();
+        if (oldRect && nodes.length) {
+          rescaleNodesAndRest(oldRect, newRect);
+        }
+        sceneRect = newRect;
+        setStatus();
+        draw();
+      };
+      img.onerror = () => {
+        bgImage = null;
+        bgImageLoaded = false;
+        sceneRect = computeSceneRect();
+        setStatus();
+        draw();
+      };
+      img.src = bg.url;
+    } else {
+      bgImage = null;
+      bgImageLoaded = false;
+      bgUrlInput.value = "";
+      sceneRect = computeSceneRect();
+    }
+
+    mode = "ready";
+    isDragging = false;
+    draggedIndex = -1;
+    simPlaying = false;
+    simStartedOnce = false;
+    lastTime = null;
+
+    setStatus();
+    draw();
+  }
+
+  function handleResize() {
+    const oldRect = sceneRect ? { ...sceneRect } : null;
+    resizeCanvasToElement();
+    const newRect = computeSceneRect();
+    if (oldRect && nodes.length) {
+      rescaleNodesAndRest(oldRect, newRect);
+    }
+    sceneRect = newRect;
+    draw();
+  }
+
   function loop(timestamp) {
     if (lastTime == null) lastTime = timestamp;
     const dtReal = (timestamp - lastTime) / 1000;
@@ -866,10 +877,7 @@
     const userDt = parseFloat(dtInput.value || "0.016");
     const steps = Math.max(1, Math.round(dtReal / userDt));
 
-    const shouldStep =
-      mode === "running" &&
-      (simPlaying || isDragging); // 드래그 중이거나 Space 재생 ON이면 진행
-
+    const shouldStep = (mode === "running") && (simPlaying || isDragging);
     if (shouldStep) {
       for (let i = 0; i < steps; i++) {
         stepSimulation(userDt);
@@ -879,10 +887,314 @@
     draw();
     requestAnimationFrame(loop);
   }
-  requestAnimationFrame(loop);
 
-  // 초기 상태
+  // ---- UI Elements (변수 선언 이후) ----------------------------------------
+  const targetCountInput = document.getElementById("targetCountInput");
+  const nodeCountInfo = document.getElementById("nodeCountInfo");
+  const btnApply = document.getElementById("btnApply");
+  const btnReset = document.getElementById("btnReset");
+
+  const dtInput = document.getElementById("dtInput");
+  const gravityInput = document.getElementById("gravityInput");
+  const iterInput = document.getElementById("iterInput");
+  const dampingInput = document.getElementById("dampingInput");
+  const stiffnessInput = document.getElementById("stiffnessInput");
+  const bendingStiffnessInput = document.getElementById("bendingStiffnessInput");
+  const dragStiffnessInput = document.getElementById("dragStiffnessInput");
+  const showBendingInput = document.getElementById("showBendingInput");
+
+  const bendNodeIndexInput = document.getElementById("bendNodeIndexInput");
+  const bendNodeValueInput = document.getElementById("bendNodeValueInput");
+  const bendApplyNodeBtn = document.getElementById("bendApplyNodeBtn");
+
+  const bgUrlInput = document.getElementById("bgUrlInput");
+  const bgSetBtn = document.getElementById("bgSetBtn");
+  const bgClearBtn = document.getElementById("bgClearBtn");
+
+  const sceneNameInput = document.getElementById("sceneNameInput");
+  const saveSceneBtn = document.getElementById("saveSceneBtn");
+  const sceneFileInput = document.getElementById("sceneFileInput");
+
+  const statusBox = document.getElementById("statusBox");
+
+  // ---- Event Handlers ------------------------------------------------------
+  btnReset.addEventListener("click", resetAll);
+
+  btnApply.addEventListener("click", () => {
+    if (nodes.length < 2) {
+      alert("노드를 최소 2개 이상 만들어야 합니다.");
+      return;
+    }
+    constraints = [];
+    bendingEdgeConstraints = [];
+    bendingOrientationConstraints = [];
+
+    for (let i = 0; i < nodes.length - 1; i++) {
+      const a = nodes[i];
+      const b = nodes[i+1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      constraints.push({ i1: i, i2: i+1, restLength: len });
+    }
+
+    const globalBending = clamp01(parseFloat(bendingStiffnessInput.value || "0.3"));
+    bendingStiffnessPerNode = new Array(nodes.length).fill(globalBending);
+
+    if (nodes.length >= 3) {
+      for (let j = 1; j <= nodes.length - 2; j++) {
+        const iPrev = j - 1;
+        const iMid  = j;
+        const iNext = j + 1;
+
+        const pPrev = nodes[iPrev];
+        const pMid  = nodes[iMid];
+        const pNext = nodes[iNext];
+
+        const dx01 = pMid.x  - pPrev.x;
+        const dy01 = pMid.y  - pPrev.y;
+        const dx12 = pNext.x - pMid.x;
+        const dy12 = pNext.y - pMid.y;
+        const dx02 = pNext.x - pPrev.x;
+        const dy02 = pNext.y - pPrev.y;
+
+        const len01 = Math.hypot(dx01, dy01) || 1;
+        const len12 = Math.hypot(dx12, dy12) || 1;
+        const len02 = Math.hypot(dx02, dy02) || 1;
+
+        bendingEdgeConstraints.push({ i1: iPrev, i2: iMid,  restLength: len01, j });
+        bendingEdgeConstraints.push({ i1: iMid,  i2: iNext, restLength: len12, j });
+        bendingEdgeConstraints.push({ i1: iPrev, i2: iNext, restLength: len02, j });
+
+        const lenAC = Math.hypot(dx02, dy02);
+        if (lenAC > 1e-6) {
+          const ux = dx02 / lenAC;
+          const uy = dy02 / lenAC;
+          const apx = pMid.x - pPrev.x;
+          const apy = pMid.y - pPrev.y;
+          const restDist = apx * uy - apy * ux;
+          bendingOrientationConstraints.push({
+            i0: iPrev,
+            i1: iMid,
+            i2: iNext,
+            restDist,
+            j
+          });
+        }
+      }
+    }
+
+    for (const n of nodes) {
+      n.prevX = n.x;
+      n.prevY = n.y;
+      if (n.invMass === undefined) n.invMass = 1;
+      if (n.pinned === undefined) n.pinned = false;
+    }
+
+    mode = "ready";
+    setStatus();
+    draw();
+  });
+
+  bendApplyNodeBtn.addEventListener("click", () => {
+    const j = parseInt(bendNodeIndexInput.value || "0", 10);
+    if (!Number.isFinite(j)) return;
+    if (nodes.length < 3) {
+      alert("먼저 노드를 최소 3개 만들고 Apply를 눌러주세요.");
+      return;
+    }
+    if (j < 1 || j > nodes.length - 2) {
+      alert(`유효한 j 범위는 1 ~ ${nodes.length - 2} 입니다.`);
+      return;
+    }
+    const v = clamp01(parseFloat(bendNodeValueInput.value || "0"));
+    if (!bendingStiffnessPerNode || bendingStiffnessPerNode.length === 0) {
+      const globalBending = clamp01(parseFloat(bendingStiffnessInput.value || "0.3"));
+      bendingStiffnessPerNode = new Array(nodes.length).fill(globalBending);
+    }
+    bendingStiffnessPerNode[j] = v;
+    setStatus();
+  });
+
+  bgSetBtn.addEventListener("click", () => {
+    const url = bgUrlInput.value.trim();
+    if (!url) {
+      alert("이미지 URL을 입력해주세요.");
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const oldRect = sceneRect ? { ...sceneRect } : null;
+      bgImage = img;
+      bgImageLoaded = true;
+      const newRect = computeSceneRect();
+      if (oldRect && nodes.length) {
+        rescaleNodesAndRest(oldRect, newRect);
+      }
+      sceneRect = newRect;
+      setStatus();
+      draw();
+    };
+    img.onerror = () => {
+      alert("이미지를 불러오지 못했습니다. URL을 확인해주세요.");
+      bgImage = null;
+      bgImageLoaded = false;
+      sceneRect = computeSceneRect();
+      setStatus();
+      draw();
+    };
+    img.src = url;
+  });
+
+  bgClearBtn.addEventListener("click", () => {
+    const oldRect = sceneRect ? { ...sceneRect } : null;
+    bgImage = null;
+    bgImageLoaded = false;
+    bgUrlInput.value = "";
+    const newRect = computeSceneRect();
+    if (oldRect && nodes.length) {
+      rescaleNodesAndRest(oldRect, newRect);
+    }
+    sceneRect = newRect;
+    setStatus();
+    draw();
+  });
+
+  saveSceneBtn.addEventListener("click", () => {
+    if (!nodes.length) {
+      alert("저장할 노드가 없습니다. 먼저 씬을 구성해주세요.");
+      return;
+    }
+    const scene = buildSceneObject();
+    const json = JSON.stringify(scene, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+
+    const baseName = (sceneNameInput.value.trim() || "scene");
+    const fileName = baseName + ".pbdscene";
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  });
+
+  sceneFileInput.addEventListener("change", (evt) => {
+    const file = evt.target.files && evt.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const scene = JSON.parse(text);
+        loadSceneObject(scene);
+        const name = file.name.replace(/\.pbdscene$/i, "");
+        sceneNameInput.value = name;
+      } catch (err) {
+        alert("씬 파일을 읽는 중 오류가 발생했습니다:\n" + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  canvas.addEventListener("mousedown", (evt) => {
+    const pos = getMousePos(evt);
+    mousePos = pos;
+
+    if (evt.shiftKey) {
+      const idx = findNodeAt(pos, nodeRadius * 1.5);
+      if (idx >= 0) {
+        nodes[idx].pinned = !nodes[idx].pinned;
+        nodes[idx].invMass = nodes[idx].pinned ? 0 : 1;
+        setStatus();
+        draw();
+      }
+      return;
+    }
+
+    if (mode === "editing") {
+      const targetCount = parseInt(targetCountInput.value || "0", 10);
+      if (Number.isNaN(targetCount) || targetCount <= 0) {
+        alert("목표 노드 수 N을 올바르게 입력하세요.");
+        return;
+      }
+      if (nodes.length >= targetCount) {
+        alert("이미 목표 노드 수만큼 생성했습니다. Apply 또는 Reset을 눌러주세요.");
+        return;
+      }
+      nodes.push({
+        x: pos.x,
+        y: pos.y,
+        prevX: pos.x,
+        prevY: pos.y,
+        invMass: 1,
+        pinned: false
+      });
+      setStatus();
+      draw();
+    } else {
+      const idx = findNodeAt(pos, nodeRadius * 1.5);
+      if (idx >= 0) {
+        isDragging = true;
+        draggedIndex = idx;
+        simStartedOnce = true;
+        const n = nodes[idx];
+        n.prevX = n.x;
+        n.prevY = n.y;
+        mode = "running";
+        setStatus();
+      }
+    }
+  });
+
+  canvas.addEventListener("mousemove", (evt) => {
+    const pos = getMousePos(evt);
+    mousePos = pos;
+  });
+
+  canvas.addEventListener("mouseup", () => {
+    isDragging = false;
+    draggedIndex = -1;
+    if (!simPlaying && mode === "running") {
+      mode = "ready";
+    }
+    setStatus();
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    isDragging = false;
+    draggedIndex = -1;
+    if (!simPlaying && mode === "running") {
+      mode = "ready";
+    }
+    setStatus();
+  });
+
+  window.addEventListener("keydown", (evt) => {
+    if (evt.code === "Space") {
+      evt.preventDefault();
+      if (mode === "editing") return;
+      simPlaying = !simPlaying;
+      if (simPlaying && mode === "ready") {
+        mode = "running";
+      } else if (!simPlaying && !isDragging) {
+        mode = "ready";
+      }
+      setStatus();
+    }
+  });
+
+  window.addEventListener("resize", handleResize);
+
+  // ---- 초기 세팅 -----------------------------------------------------------
+  resizeCanvasToElement();
+  sceneRect = computeSceneRect();
+  draw();
   setStatus();
+  requestAnimationFrame(loop);
 })();
 </script>
 </body>
